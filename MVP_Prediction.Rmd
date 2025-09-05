@@ -1,0 +1,118 @@
+---
+title: "MVP_Prediction"
+output: html_document
+date: "2025-08-06"
+---
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+install.packages(c("dplyr", "purrr", "readr", "ggplot2", "baseballr"))
+library(dplyr)
+library(purrr)
+library(readr)
+library(ggplot2)
+library(baseballr)
+
+normalize <- function(x) {
+  rng <- range(x, na.rm = TRUE)
+  if (diff(rng) == 0) {
+    return(rep(50, length(x)))
+  }
+  (x - rng[1]) / (rng[2] - rng[1]) * 100
+}
+
+fangraph_stats <- function(yr) {
+  bind_rows(
+    fg_batter_leaders(
+      startseason = as.character(yr),
+      endseason   = as.character(yr),
+      lg          = "al",
+      qual        = "0",
+      stats       = "bat"
+    ) %>% mutate(Year = yr, League = "AL"),
+    
+    fg_batter_leaders(
+      startseason = as.character(yr),
+      endseason   = as.character(yr),
+      lg          = "nl",
+      qual        = "0",
+      stats       = "bat"
+    ) %>% mutate(Year = yr, League = "NL")
+  )
+}
+
+fangraphs_stats <- map_df(2014:2024, fangraph_stats)
+
+write.csv(fangraphs_stats, "fg_stats_2014_2024.csv", row.names = FALSE)
+
+training_data <- fangraphs_stats %>%
+  filter(!is.na(WAR), !is.na(wRC_plus), !is.na(wOBA), !is.na(OPS)) %>%
+  mutate(
+    WAR_norm      = normalize(WAR),
+    wRC_plus_norm = normalize(wRC_plus),
+    wOBA_norm     = normalize(wOBA),
+    OPS_norm      = normalize(OPS),
+    Score = 0.4 * WAR_norm + 
+            0.35 * wRC_plus_norm + 
+            0.15 * wOBA_norm + 
+            0.1 * OPS_norm
+  )
+
+model <- lm(Score ~ WAR + wRC_plus + wOBA + OPS, data = training_data)
+summary(model)
+
+data_2025 <- data.frame(
+  Player   = c("Aaron Judge", "Cal Raleigh", "Bobby Witt Jr.", "Byron Buxton", "Pete Crow-Armstrong", "Shohei Ohtani", "Ketel Marte", "Will Smith"),
+  League   = c("AL", "AL", "AL", "AL", "NL", "NL", "NL", "NL"),   # add NL players here if needed
+  WAR      = c(7.4, 6.2, 4.8, 4, 4.9, 4.3, 3.2, 3.5),
+  wRC_plus = c(219, 178, 127, 152, 133, 168, 171, 165),
+  wOBA     = c(0.484, 0.416, 0.358, 0.390, 0.358, 0.410, 0.408, 0.415),
+  OPS      = c(1.195, 1.010, 0.849, 0.925, 0.846, 0.987, 0.961, 0.965)
+)
+
+data_2025$predicted_score <- predict(model, newdata = data_2025)
+
+data_2025 <- data_2025 %>% arrange(desc(predicted_score))
+print(data_2025)
+
+al_2025 <- data_2025 %>% filter(League == "AL")
+nl_2025 <- data_2025 %>% filter(League == "NL")
+
+#AL MVP
+ggplot(al_2025, aes(x = reorder(Player, predicted_score), y = predicted_score)) +
+  geom_col(fill = "royalblue4") +
+  geom_text(aes(label = round(predicted_score, 1)),
+            hjust = -0.2,
+            size = 3, 
+            color = "black") +
+  coord_flip() +
+  labs(title = "2025 AL MVP Score Prediction", x = "Player", y = "Score") +
+  theme_minimal()
+
+#NL MVP
+ggplot(nl_2025, aes(x = reorder(Player, predicted_score), y = predicted_score)) +
+  geom_col(fill = "red4") +
+  geom_text(aes(label = round(predicted_score, 1)),
+            hjust = -0.2,
+            size = 3, 
+            color = "black") +
+  coord_flip() +
+  labs(title = "2025 NL MVP Score Prediction", x = "Player", y = "Score") +
+  theme_minimal()
+
+#Both Leagues
+ggplot(data_2025, aes(x = reorder(Player, predicted_score), y = predicted_score, fill = League)) +
+  geom_col() +
+  geom_text(aes(label = round(predicted_score, 1)),
+            hjust = -0.2,
+            size = 3, 
+            color = "black") +
+  coord_flip() +
+  labs(title = "2025 MVP Score Prediction by League", 
+       x = "Player", 
+       y = "Score") +
+  scale_fill_manual(values = c("AL" = "royalblue4", "NL" = "red4")) +
+  theme_minimal()
+
+```
